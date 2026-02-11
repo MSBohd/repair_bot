@@ -8,7 +8,7 @@ import os
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TOKEN = os.getenv("TOKEN")
+TOKEN = "8571532380:AAFw_lIVjtPLyN6F0MpwRAOTv5wS-fZmL0o"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Файли з цінами
@@ -500,3 +500,4 @@ def main():
 if __name__ == '__main__':
 
     main()
+
