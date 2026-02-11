@@ -8,10 +8,8 @@ import os
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TOKEN = "8571532380:AAFw_lIVjtPLyN6F0MpwRAOTv5wS-fZmL0o"
-
-# ШЛЯХ ДО ПАПКИ З ФАЙЛАМИ
-BASE_DIR = r"C:\Users\User\Desktop\telegram_bot"
+TOKEN = os.getenv("TOKEN")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Файли з цінами
 FILES = {
@@ -500,4 +498,5 @@ def main():
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
+
     main()
