@@ -10,6 +10,8 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 TOKEN = "8571532380:AAFw_lIVjtPLyN6F0MpwRAOTv5wS-fZmL0o"
+
+# ШЛЯХ ДО ПАПКИ З ФАЙЛАМИ
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Файли з цінами
@@ -257,29 +259,49 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await show_repairs_menu_message(update, user_data)
 
+def get_available_repairs(repairs, client_type):
+    """Повертає тільки ремонти з ціною > 0"""
+    available = []
+    for idx, repair in enumerate(repairs):
+        price = repair[client_type]
+        if price > 0:  # ТІЛЬКИ якщо ціна більше 0
+            available.append((idx, repair))
+    return available
+
 async def show_repairs_menu_message(update, user_data):
     repairs = user_data["repairs_list"]
     client_type = user_data["client_type"]
     client_label = "РОЗДРІБ" if client_type == "client" else "ОПТ"
     currency = get_currency(client_type)
     
-    # ТІЛЬКИ ЗАГОЛОВОК - без списку ремонтів
+    # Отримуємо тільки доступні ремонти (ціна > 0)
+    available_repairs = get_available_repairs(repairs, client_type)
+    
+    if not available_repairs:
+        await update.message.reply_text("❌ Немає доступних ремонтів для цього типу клієнта.")
+        return
+    
+    # ЗАГОЛОВОК + СПИСОК З ЦІНАМИ
     text = f"*{user_data['category']}: {user_data['model']}*\n"
     text += f"Тип: *{client_label}*\n\n"
-    text += "Оберіть ремонти:"
     
-    keyboard = []
-    for idx, repair in enumerate(repairs):
+    # Список ремонтів з цінами (розділений для зручності)
+    text += "💰 *Прайс-лист:*\n"
+    text += "━━━━━━━━━━━━━━━━━━\n"
+    for original_idx, repair in available_repairs:
         price = repair[client_type]
-        
-        # ПРОПУСКАЄМО якщо ціна 0 в опті
-        if price == 0:
-            continue
-        
-        check = "✓" if idx in user_data["selected_repairs"] else "○"
-        # ЦІНА В КНОПЦІ
-        button_text = f"{check} {repair['name']}: {price:.0f} {currency}"
-        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"repair_{idx}")])
+        check = "☑️" if original_idx in user_data["selected_repairs"] else "☐"
+        text += f"{check} {repair['name']}\n    💵 {price:.0f} {currency}\n"
+        text += "━━━━━━━━━━━━━━━━━━\n"
+    
+    text += "\n✅ Оберіть потрібні ремонти:"
+    
+    # КНОПКИ БЕЗ ЦІН (тільки доступні)
+    keyboard = []
+    for original_idx, repair in available_repairs:
+        check = "✓" if original_idx in user_data["selected_repairs"] else "○"
+        button_text = f"{check} {repair['name']}"
+        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"repair_{original_idx}")])
     
     control_buttons = []
     if user_data["selected_repairs"]:
@@ -294,48 +316,6 @@ async def show_repairs_menu_message(update, user_data):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
 
-
-async def show_repairs_menu_inline(query, user_data):
-    repairs = user_data["repairs_list"]
-    client_type = user_data["client_type"]
-    client_label = "РОЗДРІБ" if client_type == "client" else "ОПТ"
-    currency = get_currency(client_type)
-    
-    # ТІЛЬКИ ЗАГОЛОВОК - без списку ремонтів
-    text = f"*{user_data['category']}: {user_data['model']}*\n"
-    text += f"Тип: *{client_label}*\n\n"
-    text += "Оберіть ремонти:"
-    
-    keyboard = []
-    for idx, repair in enumerate(repairs):
-        price = repair[client_type]
-        
-        # ПРОПУСКАЄМО якщо ціна 0 в опті
-        if price == 0:
-            continue
-        
-        check = "✓" if idx in user_data["selected_repairs"] else "○"
-        # ЦІНА В КНОПЦІ
-        button_text = f"{check} {repair['name']}: {price:.0f} {currency}"
-        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"repair_{idx}")])
-    
-    control_buttons = []
-    if user_data["selected_repairs"]:
-        control_buttons.append(InlineKeyboardButton("💰 Розрахувати", callback_data="calculate"))
-        control_buttons.append(InlineKeyboardButton("🔄 Скинути", callback_data="reset_repairs"))
-    
-    if control_buttons:
-        keyboard.append(control_buttons)
-    
-    keyboard.append([InlineKeyboardButton("◀️ Назад", callback_data="back_to_client")])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    try:
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
-    except Exception as e:
-        logger.warning(f"Throttling при оновленні меню: {e}")
-
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -346,10 +326,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if data.startswith("repair_"):
         repair_idx = int(data.replace("repair_", ""))
-        if repair_idx in user_data["selected_repairs"]:
-            user_data["selected_repairs"].remove(repair_idx)
-        else:
-            user_data["selected_repairs"].append(repair_idx)
+        
+        # Перевіряємо чи ремонт доступний (ціна > 0)
+        repairs = user_data["repairs_list"]
+        client_type = user_data["client_type"]
+        
+        if repair_idx < len(repairs):
+            price = repairs[repair_idx][client_type]
+            if price > 0:  # Тільки якщо ціна > 0
+                if repair_idx in user_data["selected_repairs"]:
+                    user_data["selected_repairs"].remove(repair_idx)
+                else:
+                    user_data["selected_repairs"].append(repair_idx)
+        
         await show_repairs_menu_inline(query, user_data)
     
     elif data == "calculate":
@@ -379,17 +368,30 @@ async def show_repairs_menu_inline(query, user_data):
     client_label = "РОЗДРІБ" if client_type == "client" else "ОПТ"
     currency = get_currency(client_type)
     
+    # Отримуємо тільки доступні ремонти (ціна > 0)
+    available_repairs = get_available_repairs(repairs, client_type)
+    
+    # ЗАГОЛОВОК + СПИСОК З ЦІНАМИ
     text = f"*{user_data['category']}: {user_data['model']}*\n"
     text += f"Тип: *{client_label}*\n\n"
-    text += "Оберіть ремонти:\n\n"
     
-    keyboard = []
-    for idx, repair in enumerate(repairs):
+    # Список ремонтів з цінами (розділений для зручності)
+    text += "💰 *Прайс-лист:*\n"
+    text += "━━━━━━━━━━━━━━━━━━\n"
+    for original_idx, repair in available_repairs:
         price = repair[client_type]
-        check = "☑️" if idx in user_data["selected_repairs"] else "☐"
-        text += f"{check} {repair['name']}: {price} {currency}\n"
-        button_text = f"{'✓' if idx in user_data['selected_repairs'] else '○'} {repair['name']}"
-        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"repair_{idx}")])
+        check = "☑️" if original_idx in user_data["selected_repairs"] else "☐"
+        text += f"{check} {repair['name']}\n    💵 {price:.0f} {currency}\n"
+        text += "━━━━━━━━━━━━━━━━━━\n"
+    
+    text += "\n✅ Оберіть потрібні ремонти:"
+    
+    # КНОПКИ БЕЗ ЦІН (тільки доступні)
+    keyboard = []
+    for original_idx, repair in available_repairs:
+        check = "✓" if original_idx in user_data["selected_repairs"] else "○"
+        button_text = f"{check} {repair['name']}"
+        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"repair_{original_idx}")])
     
     control_buttons = []
     if user_data["selected_repairs"]:
@@ -425,7 +427,7 @@ async def calculate_result(query, user_data):
         repair = repairs[idx]
         price = repair[client_type]
         total += price
-        details.append(f"• {repair['name']}: {price} {currency}")
+        details.append(f"• {repair['name']}: {price:.0f} {currency}")
     
     num_repairs = len(user_data["selected_repairs"])
     discount_percent = 0
@@ -501,5 +503,3 @@ def main():
 if __name__ == '__main__':
     asyncio.set_event_loop(asyncio.new_event_loop())
     main()
-
-
