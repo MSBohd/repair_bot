@@ -117,6 +117,15 @@ def load_repairs(category, model):
     
     return []
 
+def get_available_repairs(repairs, client_type):
+    """Повертає тільки ремонти з ціною > 0"""
+    available = []
+    for idx, repair in enumerate(repairs):
+        price = repair[client_type]
+        if price > 0:
+            available.append((idx, repair))
+    return available
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_data = get_user_data(user_id)
@@ -130,7 +139,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     keyboard = [
         ["📱 iPhone", "📱 iPad"],
-        ["💻 MacBook", "⌚ Apple Watch"]
+        ["💻 MacBook", "⌚ Apple Watch"],
+        ["🗑️ Очистити чат"]
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
@@ -144,7 +154,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_category_keyboard(update):
     keyboard = [
         ["📱 iPhone", "📱 iPad"],
-        ["💻 MacBook", "⌚ Apple Watch"]
+        ["💻 MacBook", "⌚ Apple Watch"],
+        ["🗑️ Очистити чат"]
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text("Оберіть категорію:", reply_markup=reply_markup)
@@ -155,6 +166,33 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     
     logger.info(f"Користувач {user_id} написав: {text}, стан: {user_data['state']}")
+    
+    # ========================
+    # ОЧИЩЕННЯ ЧАТУ
+    # ========================
+    if text == "🗑️ Очистити чат":
+        user_data["category"] = None
+        user_data["model"] = None
+        user_data["client_type"] = None
+        user_data["selected_repairs"] = []
+        user_data["repairs_list"] = []
+        user_data["state"] = "category"
+        
+        keyboard = [
+            ["📱 iPhone", "📱 iPad"],
+            ["💻 MacBook", "⌚ Apple Watch"],
+            ["🗑️ Очистити чат"]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        
+        await update.message.reply_text(
+            "🧹 *Чат очищено!*\n\n"
+            "🍎 *Калькулятор ремонтів Apple*\n\n"
+            "Оберіть категорію пристрою:",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+        return
     
     # ========================
     # ВИБІР КАТЕГОРІЇ
@@ -174,7 +212,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = []
         for i in range(0, len(models), 2):
             keyboard.append(models[i:i+2])
-        keyboard.append(["◀️ Назад"])
+        keyboard.append(["◀️ Назад", "🗑️ Очистити чат"])
         
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         await update.message.reply_text(
@@ -205,9 +243,15 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         opt_available = OPT_AVAILABLE.get(user_data["category"], False)
         
         if opt_available:
-            keyboard = [["👤 РОЗДРІБ", "🏢 ОПТ"], ["◀️ Назад"]]
+            keyboard = [
+                ["👤 РОЗДРІБ", "🏢 ОПТ"],
+                ["◀️ Назад", "🗑️ Очистити чат"]
+            ]
         else:
-            keyboard = [["👤 РОЗДРІБ"], ["◀️ Назад"]]
+            keyboard = [
+                ["👤 РОЗДРІБ"],
+                ["◀️ Назад", "🗑️ Очистити чат"]
+            ]
         
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         await update.message.reply_text(
@@ -227,7 +271,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = []
             for i in range(0, len(models), 2):
                 keyboard.append(models[i:i+2])
-            keyboard.append(["◀️ Назад"])
+            keyboard.append(["◀️ Назад", "🗑️ Очистити чат"])
             reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
             await update.message.reply_text("Оберіть модель:", reply_markup=reply_markup)
             return
@@ -259,22 +303,12 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await show_repairs_menu_message(update, user_data)
 
-def get_available_repairs(repairs, client_type):
-    """Повертає тільки ремонти з ціною > 0"""
-    available = []
-    for idx, repair in enumerate(repairs):
-        price = repair[client_type]
-        if price > 0:  # ТІЛЬКИ якщо ціна більше 0
-            available.append((idx, repair))
-    return available
-
 async def show_repairs_menu_message(update, user_data):
     repairs = user_data["repairs_list"]
     client_type = user_data["client_type"]
     client_label = "РОЗДРІБ" if client_type == "client" else "ОПТ"
     currency = get_currency(client_type)
     
-    # Отримуємо тільки доступні ремонти (ціна > 0)
     available_repairs = get_available_repairs(repairs, client_type)
     
     if not available_repairs:
@@ -285,22 +319,35 @@ async def show_repairs_menu_message(update, user_data):
     text = f"*{user_data['category']}: {user_data['model']}*\n"
     text += f"Тип: *{client_label}*\n\n"
     
-    # Список ремонтів з цінами (розділений для зручності)
+    # Список ремонтів з цінами
     text += "💰 *Прайс-лист:*\n"
     text += "━━━━━━━━━━━━━━━━━━\n"
     for original_idx, repair in available_repairs:
         price = repair[client_type]
         check = "☑️" if original_idx in user_data["selected_repairs"] else "☐"
-        text += f"{check} {repair['name']}\n    💵 {price:.0f} {currency}\n"
+        
+        # ПЕРЕНІС ДОВГИХ НАЗВ
+        repair_name = repair['name']
+        if len(repair_name) > 30:
+            text += f"{check} {repair_name[:30]}\n"
+            text += f"    {repair_name[30:]}\n"
+        else:
+            text += f"{check} {repair_name}\n"
+        
+        text += f"    💵 {price:.0f} {currency}\n"
         text += "━━━━━━━━━━━━━━━━━━\n"
     
     text += "\n✅ Оберіть потрібні ремонти:"
     
-    # КНОПКИ БЕЗ ЦІН (тільки доступні)
+    # КНОПКИ БЕЗ ЦІН
     keyboard = []
     for original_idx, repair in available_repairs:
         check = "✓" if original_idx in user_data["selected_repairs"] else "○"
-        button_text = f"{check} {repair['name']}"
+        repair_name = repair['name']
+        # Скорочуємо назву в кнопці якщо дуже довга
+        if len(repair_name) > 35:
+            repair_name = repair_name[:32] + "..."
+        button_text = f"{check} {repair_name}"
         keyboard.append([InlineKeyboardButton(button_text, callback_data=f"repair_{original_idx}")])
     
     control_buttons = []
@@ -327,13 +374,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("repair_"):
         repair_idx = int(data.replace("repair_", ""))
         
-        # Перевіряємо чи ремонт доступний (ціна > 0)
         repairs = user_data["repairs_list"]
         client_type = user_data["client_type"]
         
         if repair_idx < len(repairs):
             price = repairs[repair_idx][client_type]
-            if price > 0:  # Тільки якщо ціна > 0
+            if price > 0:
                 if repair_idx in user_data["selected_repairs"]:
                     user_data["selected_repairs"].remove(repair_idx)
                 else:
@@ -354,9 +400,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         opt_available = OPT_AVAILABLE.get(user_data["category"], False)
         if opt_available:
-            keyboard = [["👤 РОЗДРІБ", "🏢 ОПТ"], ["◀️ Назад"]]
+            keyboard = [
+                ["👤 РОЗДРІБ", "🏢 ОПТ"],
+                ["◀️ Назад", "🗑️ Очистити чат"]
+            ]
         else:
-            keyboard = [["👤 РОЗДРІБ"], ["◀️ Назад"]]
+            keyboard = [
+                ["👤 РОЗДРІБ"],
+                ["◀️ Назад", "🗑️ Очистити чат"]
+            ]
         
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         await query.message.reply_text("Оберіть тип клієнта:", reply_markup=reply_markup)
@@ -368,29 +420,41 @@ async def show_repairs_menu_inline(query, user_data):
     client_label = "РОЗДРІБ" if client_type == "client" else "ОПТ"
     currency = get_currency(client_type)
     
-    # Отримуємо тільки доступні ремонти (ціна > 0)
     available_repairs = get_available_repairs(repairs, client_type)
     
     # ЗАГОЛОВОК + СПИСОК З ЦІНАМИ
     text = f"*{user_data['category']}: {user_data['model']}*\n"
     text += f"Тип: *{client_label}*\n\n"
     
-    # Список ремонтів з цінами (розділений для зручності)
+    # Список ремонтів з цінами
     text += "💰 *Прайс-лист:*\n"
     text += "━━━━━━━━━━━━━━━━━━\n"
     for original_idx, repair in available_repairs:
         price = repair[client_type]
         check = "☑️" if original_idx in user_data["selected_repairs"] else "☐"
-        text += f"{check} {repair['name']}\n    💵 {price:.0f} {currency}\n"
+        
+        # ПЕРЕНІС ДОВГИХ НАЗВ
+        repair_name = repair['name']
+        if len(repair_name) > 30:
+            text += f"{check} {repair_name[:30]}\n"
+            text += f"    {repair_name[30:]}\n"
+        else:
+            text += f"{check} {repair_name}\n"
+        
+        text += f"    💵 {price:.0f} {currency}\n"
         text += "━━━━━━━━━━━━━━━━━━\n"
     
     text += "\n✅ Оберіть потрібні ремонти:"
     
-    # КНОПКИ БЕЗ ЦІН (тільки доступні)
+    # КНОПКИ БЕЗ ЦІН
     keyboard = []
     for original_idx, repair in available_repairs:
         check = "✓" if original_idx in user_data["selected_repairs"] else "○"
-        button_text = f"{check} {repair['name']}"
+        repair_name = repair['name']
+        # Скорочуємо назву в кнопці якщо дуже довга
+        if len(repair_name) > 35:
+            repair_name = repair_name[:32] + "..."
+        button_text = f"{check} {repair_name}"
         keyboard.append([InlineKeyboardButton(button_text, callback_data=f"repair_{original_idx}")])
     
     control_buttons = []
@@ -464,7 +528,8 @@ async def calculate_result(query, user_data):
     
     keyboard = [
         ["📱 iPhone", "📱 iPad"],
-        ["💻 MacBook", "⌚ Apple Watch"]
+        ["💻 MacBook", "⌚ Apple Watch"],
+        ["🗑️ Очистити чат"]
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
