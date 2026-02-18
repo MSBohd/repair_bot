@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 
 TOKEN = "8571532380:AAFw_lIVjtPLyN6F0MpwRAOTv5wS-fZmL0o"
 
+# ПАРОЛЬ ДЛЯ ОПТУ
+OPT_PASSWORD = "4343"
+
 # ШЛЯХ ДО ПАПКИ З ФАЙЛАМИ
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -57,7 +60,8 @@ def get_user_data(user_id):
             "client_type": None,
             "selected_repairs": [],
             "repairs_list": [],
-            "state": "start"
+            "state": "start",
+            "opt_unlocked": False  # Чи введено пароль для опту
         }
     return user_data_store[user_id]
 
@@ -171,12 +175,16 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ОЧИЩЕННЯ ЧАТУ
     # ========================
     if text == "🗑️ Очистити чат":
-        user_data["category"] = None
-        user_data["model"] = None
-        user_data["client_type"] = None
-        user_data["selected_repairs"] = []
-        user_data["repairs_list"] = []
-        user_data["state"] = "category"
+        # ПОВНІСТЮ ОЧИЩАЄМО ВСІ ДАНІ
+        user_data.update({
+            "category": None,
+            "model": None,
+            "client_type": None,
+            "selected_repairs": [],
+            "repairs_list": [],
+            "state": "category",
+            "opt_unlocked": False
+        })
         
         keyboard = [
             ["📱 iPhone", "📱 iPad"],
@@ -185,6 +193,15 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         
+        # Видаляємо попереднє повідомлення якщо можливо
+        try:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=update.message.message_id - 1
+            )
+        except:
+            pass
+        
         await update.message.reply_text(
             "🧹 *Чат очищено!*\n\n"
             "🍎 *Калькулятор ремонтів Apple*\n\n"
@@ -192,6 +209,51 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
+        return
+    
+    # ========================
+    # ВВЕДЕННЯ ПАРОЛЯ ДЛЯ ОПТУ
+    # ========================
+    if user_data["state"] == "waiting_password":
+        if text == OPT_PASSWORD:
+            user_data["opt_unlocked"] = True
+            user_data["client_type"] = "opt"
+            user_data["state"] = "repairs"
+            user_data["selected_repairs"] = []
+            
+            await update.message.reply_text(
+                "✅ *Пароль прийнято!*\n\nЗараз покажу ремонти...",
+                parse_mode='Markdown',
+                reply_markup=ReplyKeyboardRemove()
+            )
+            await show_repairs_menu_message(update, user_data)
+        else:
+            # НЕПРАВИЛЬНИЙ ПАРОЛЬ - ПОВЕРТАЄМО НА ПОЧАТОК
+            user_data.update({
+                "category": None,
+                "model": None,
+                "client_type": None,
+                "selected_repairs": [],
+                "repairs_list": [],
+                "state": "category",
+                "opt_unlocked": False
+            })
+            
+            keyboard = [
+                ["📱 iPhone", "📱 iPad"],
+                ["💻 MacBook", "⌚ Apple Watch"],
+                ["🗑️ Очистити чат"]
+            ]
+            reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+            
+            await update.message.reply_text(
+                "❌ *Невірний пароль!*\n\n"
+                "Повертаємось на початок.\n\n"
+                "🍎 *Калькулятор ремонтів Apple*\n\n"
+                "Оберіть категорію пристрою:",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
         return
     
     # ========================
@@ -285,6 +347,22 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode='Markdown'
                 )
                 return
+            
+            # ПЕРЕВІРКА ПАРОЛЯ
+            if not user_data["opt_unlocked"]:
+                user_data["state"] = "waiting_password"
+                
+                keyboard = [["🗑️ Очистити чат"]]
+                reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+                
+                await update.message.reply_text(
+                    "🔐 *Доступ до оптових цін*\n\n"
+                    "Введіть пароль:",
+                    reply_markup=reply_markup,
+                    parse_mode='Markdown'
+                )
+                return
+            
             user_data["client_type"] = "opt"
         
         elif text == "👤 РОЗДРІБ":
