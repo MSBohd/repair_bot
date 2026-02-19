@@ -61,7 +61,8 @@ def get_user_data(user_id):
             "selected_repairs": [],
             "repairs_list": [],
             "state": "start",
-            "opt_unlocked": False  # Чи введено пароль для опту
+            "opt_unlocked": False,  # ТЕПЕР ЗБЕРІГАЄТЬСЯ НАЗАВЖДИ
+            "message_ids": []
         }
     return user_data_store[user_id]
 
@@ -105,7 +106,7 @@ def load_repairs(category, model):
                 for row in ws.iter_rows(min_row=2, values_only=True):
                     if row[0]:
                         repairs.append({
-                            "name": str(row[0]),
+                            "name": str(row[0]).strip(),  # ВИПРАВЛЕНО - додав .strip()
                             "client": float(row[1]) if row[1] else 0,
                             "opt": float(row[2]) if row[2] else 0
                         })
@@ -140,6 +141,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data["selected_repairs"] = []
     user_data["repairs_list"] = []
     user_data["state"] = "category"
+    user_data["message_ids"] = []
     
     keyboard = [
         ["📱 iPhone", "📱 iPad"],
@@ -148,12 +150,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
-    await update.message.reply_text(
+    msg = await update.message.reply_text(
         "🍎 *Калькулятор ремонтів Apple*\n\n"
         "Оберіть категорію пристрою:",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
+    user_data["message_ids"].append(msg.message_id)
 
 async def show_category_keyboard(update):
     keyboard = [
@@ -175,7 +178,27 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ОЧИЩЕННЯ ЧАТУ
     # ========================
     if text == "🗑️ Очистити чат":
+        # Видаляємо всі збережені повідомлення бота
+        for msg_id in user_data.get("message_ids", []):
+            try:
+                await context.bot.delete_message(
+                    chat_id=update.effective_chat.id,
+                    message_id=msg_id
+                )
+            except Exception as e:
+                logger.warning(f"Не вдалось видалити повідомлення {msg_id}: {e}")
+        
+        # Видаляємо повідомлення користувача з командою
+        try:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=update.message.message_id
+            )
+        except:
+            pass
+        
         # ПОВНІСТЮ ОЧИЩАЄМО ВСІ ДАНІ
+        user_data.clear()
         user_data.update({
             "category": None,
             "model": None,
@@ -183,7 +206,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "selected_repairs": [],
             "repairs_list": [],
             "state": "category",
-            "opt_unlocked": False
+            "opt_unlocked": False,
+            "message_ids": []
         })
         
         keyboard = [
@@ -193,22 +217,15 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         
-        # Видаляємо попереднє повідомлення якщо можливо
-        try:
-            await context.bot.delete_message(
-                chat_id=update.effective_chat.id,
-                message_id=update.message.message_id - 1
-            )
-        except:
-            pass
-        
-        await update.message.reply_text(
-            "🧹 *Чат очищено!*\n\n"
-            "🍎 *Калькулятор ремонтів Apple*\n\n"
-            "Оберіть категорію пристрою:",
+        msg = await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="🧹 *Чат очищено!*\n\n"
+                 "🍎 *Калькулятор ремонтів Apple*\n\n"
+                 "Оберіть категорію пристрою:",
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
+        user_data["message_ids"].append(msg.message_id)
         return
     
     # ========================
@@ -221,14 +238,16 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_data["state"] = "repairs"
             user_data["selected_repairs"] = []
             
-            await update.message.reply_text(
+            msg = await update.message.reply_text(
                 "✅ *Пароль прийнято!*\n\nЗараз покажу ремонти...",
                 parse_mode='Markdown',
                 reply_markup=ReplyKeyboardRemove()
             )
+            user_data["message_ids"].append(msg.message_id)
             await show_repairs_menu_message(update, user_data)
         else:
             # НЕПРАВИЛЬНИЙ ПАРОЛЬ - ПОВЕРТАЄМО НА ПОЧАТОК
+            user_data.clear()
             user_data.update({
                 "category": None,
                 "model": None,
@@ -236,7 +255,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "selected_repairs": [],
                 "repairs_list": [],
                 "state": "category",
-                "opt_unlocked": False
+                "opt_unlocked": False,
+                "message_ids": []
             })
             
             keyboard = [
@@ -246,7 +266,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
             reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
             
-            await update.message.reply_text(
+            msg = await update.message.reply_text(
                 "❌ *Невірний пароль!*\n\n"
                 "Повертаємось на початок.\n\n"
                 "🍎 *Калькулятор ремонтів Apple*\n\n"
@@ -254,6 +274,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
+            user_data["message_ids"].append(msg.message_id)
         return
     
     # ========================
@@ -268,7 +289,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         models = load_models(text)
         
         if not models:
-            await update.message.reply_text(f"❌ Не знайдено моделей для {text}")
+            msg = await update.message.reply_text(f"❌ Не знайдено моделей для {text}")
+            user_data["message_ids"].append(msg.message_id)
             return
         
         keyboard = []
@@ -277,11 +299,12 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard.append(["◀️ Назад", "🗑️ Очистити чат"])
         
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-        await update.message.reply_text(
+        msg = await update.message.reply_text(
             f"*{text}*\n\nОберіть модель:",
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
+        user_data["message_ids"].append(msg.message_id)
     
     # ========================
     # ВИБІР МОДЕЛІ
@@ -299,7 +322,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data["repairs_list"] = repairs
         
         if not repairs:
-            await update.message.reply_text("❌ Не знайдено ремонтів для цієї моделі.")
+            msg = await update.message.reply_text("❌ Не знайдено ремонтів для цієї моделі.")
+            user_data["message_ids"].append(msg.message_id)
             return
         
         opt_available = OPT_AVAILABLE.get(user_data["category"], False)
@@ -316,12 +340,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
         
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-        await update.message.reply_text(
+        msg = await update.message.reply_text(
             f"*{user_data['category']}: {text}*\n\n"
             "Оберіть тип клієнта:",
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
+        user_data["message_ids"].append(msg.message_id)
     
     # ========================
     # ВИБІР ТИПУ КЛІЄНТА
@@ -335,17 +360,19 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 keyboard.append(models[i:i+2])
             keyboard.append(["◀️ Назад", "🗑️ Очистити чат"])
             reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-            await update.message.reply_text("Оберіть модель:", reply_markup=reply_markup)
+            msg = await update.message.reply_text("Оберіть модель:", reply_markup=reply_markup)
+            user_data["message_ids"].append(msg.message_id)
             return
         
         if text == "🏢 ОПТ":
             opt_available = OPT_AVAILABLE.get(user_data["category"], False)
             if not opt_available:
-                await update.message.reply_text(
+                msg = await update.message.reply_text(
                     "⚠️ *Оптові ціни для цього пристрою поки що не доступні*\n\n"
                     "Зверніться до менеджера для отримання оптових цін.",
                     parse_mode='Markdown'
                 )
+                user_data["message_ids"].append(msg.message_id)
                 return
             
             # ПЕРЕВІРКА ПАРОЛЯ
@@ -355,12 +382,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 keyboard = [["🗑️ Очистити чат"]]
                 reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
                 
-                await update.message.reply_text(
+                msg = await update.message.reply_text(
                     "🔐 *Доступ до оптових цін*\n\n"
                     "Введіть пароль:",
                     reply_markup=reply_markup,
                     parse_mode='Markdown'
                 )
+                user_data["message_ids"].append(msg.message_id)
                 return
             
             user_data["client_type"] = "opt"
@@ -374,10 +402,11 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data["state"] = "repairs"
         user_data["selected_repairs"] = []
         
-        await update.message.reply_text(
+        msg = await update.message.reply_text(
             "Зараз покажу ремонти...",
             reply_markup=ReplyKeyboardRemove()
         )
+        user_data["message_ids"].append(msg.message_id)
         
         await show_repairs_menu_message(update, user_data)
 
@@ -390,7 +419,8 @@ async def show_repairs_menu_message(update, user_data):
     available_repairs = get_available_repairs(repairs, client_type)
     
     if not available_repairs:
-        await update.message.reply_text("❌ Немає доступних ремонтів для цього типу клієнта.")
+        msg = await update.message.reply_text("❌ Немає доступних ремонтів для цього типу клієнта.")
+        user_data["message_ids"].append(msg.message_id)
         return
     
     # ЗАГОЛОВОК + СПИСОК З ЦІНАМИ
@@ -404,11 +434,21 @@ async def show_repairs_menu_message(update, user_data):
         price = repair[client_type]
         check = "☑️" if original_idx in user_data["selected_repairs"] else "☐"
         
-        # ПЕРЕНІС ДОВГИХ НАЗВ
-        repair_name = repair['name']
+        # ПЕРЕНІС ДОВГИХ НАЗВ - ВИПРАВЛЕНО
+        repair_name = repair['name'].strip()  # Прибираємо зайві пробіли
         if len(repair_name) > 30:
-            text += f"{check} {repair_name[:30]}\n"
-            text += f"    {repair_name[30:]}\n"
+            # Розбиваємо по словах для кращого вигляду
+            words = repair_name.split()
+            line1 = ""
+            line2 = ""
+            for word in words:
+                if len(line1 + word) < 30:
+                    line1 += word + " "
+                else:
+                    line2 += word + " "
+            text += f"{check} {line1.strip()}\n"
+            if line2:
+                text += f"    {line2.strip()}\n"
         else:
             text += f"{check} {repair_name}\n"
         
@@ -421,7 +461,7 @@ async def show_repairs_menu_message(update, user_data):
     keyboard = []
     for original_idx, repair in available_repairs:
         check = "✓" if original_idx in user_data["selected_repairs"] else "○"
-        repair_name = repair['name']
+        repair_name = repair['name'].strip()
         # Скорочуємо назву в кнопці якщо дуже довга
         if len(repair_name) > 35:
             repair_name = repair_name[:32] + "..."
@@ -439,7 +479,8 @@ async def show_repairs_menu_message(update, user_data):
     keyboard.append([InlineKeyboardButton("◀️ Назад", callback_data="back_to_client")])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    msg = await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    user_data["message_ids"].append(msg.message_id)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -466,7 +507,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_repairs_menu_inline(query, user_data)
     
     elif data == "calculate":
-        await calculate_result(query, user_data)
+        await calculate_result(query, user_data, context)
     
     elif data == "reset_repairs":
         user_data["selected_repairs"] = []
@@ -489,7 +530,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
         
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-        await query.message.reply_text("Оберіть тип клієнта:", reply_markup=reply_markup)
+        msg = await query.message.reply_text("Оберіть тип клієнта:", reply_markup=reply_markup)
+        user_data["message_ids"].append(msg.message_id)
         await query.message.delete()
 
 async def show_repairs_menu_inline(query, user_data):
@@ -511,11 +553,20 @@ async def show_repairs_menu_inline(query, user_data):
         price = repair[client_type]
         check = "☑️" if original_idx in user_data["selected_repairs"] else "☐"
         
-        # ПЕРЕНІС ДОВГИХ НАЗВ
-        repair_name = repair['name']
+        # ПЕРЕНІС ДОВГИХ НАЗВ - ВИПРАВЛЕНО
+        repair_name = repair['name'].strip()
         if len(repair_name) > 30:
-            text += f"{check} {repair_name[:30]}\n"
-            text += f"    {repair_name[30:]}\n"
+            words = repair_name.split()
+            line1 = ""
+            line2 = ""
+            for word in words:
+                if len(line1 + word) < 30:
+                    line1 += word + " "
+                else:
+                    line2 += word + " "
+            text += f"{check} {line1.strip()}\n"
+            if line2:
+                text += f"    {line2.strip()}\n"
         else:
             text += f"{check} {repair_name}\n"
         
@@ -528,8 +579,7 @@ async def show_repairs_menu_inline(query, user_data):
     keyboard = []
     for original_idx, repair in available_repairs:
         check = "✓" if original_idx in user_data["selected_repairs"] else "○"
-        repair_name = repair['name']
-        # Скорочуємо назву в кнопці якщо дуже довга
+        repair_name = repair['name'].strip()
         if len(repair_name) > 35:
             repair_name = repair_name[:32] + "..."
         button_text = f"{check} {repair_name}"
@@ -552,7 +602,7 @@ async def show_repairs_menu_inline(query, user_data):
     except Exception as e:
         logger.warning(f"Throttling при оновленні меню: {e}")
 
-async def calculate_result(query, user_data):
+async def calculate_result(query, user_data, context):
     if not user_data["selected_repairs"]:
         await query.answer("⚠️ Оберіть хоча б один ремонт!", show_alert=True)
         return
@@ -611,12 +661,18 @@ async def calculate_result(query, user_data):
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
-    await query.message.reply_text(text, parse_mode='Markdown')
-    await query.message.reply_text(
-        "🔄 Новий розрахунок?\nОберіть категорію:",
+    msg1 = await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text=text,
+        parse_mode='Markdown'
+    )
+    msg2 = await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="🔄 Новий розрахунок?\nОберіть категорію:",
         reply_markup=reply_markup
     )
     
+    user_data["message_ids"] = [msg1.message_id, msg2.message_id]
     user_data.update({
         "state": "category",
         "category": None,
