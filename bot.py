@@ -9,7 +9,7 @@ import asyncio
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TOKEN = "8571532380:AAFw_lIVjtPLyN6F0MpwRAOTv5wS-fZmL0o"
+TOKEN = os.environ.get("BOT_TOKEN")
 
 # ПАРОЛЬ ДЛЯ ОПТУ
 OPT_PASSWORD = "4343"
@@ -702,3 +702,4 @@ def main():
 if __name__ == '__main__':
     asyncio.set_event_loop(asyncio.new_event_loop())
     main()
+
